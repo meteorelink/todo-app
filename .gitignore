@@ -1,0 +1,22 @@
+# Python 虚拟环境（可重新生成，绝不提交）
+.venv/
+
+# Python 字节码缓存（自动生成）
+__pycache__/
+*.pyc
+
+# 数据库文件（含本地数据）
+*.db
+*.sqlite3
+
+# 环境变量与密钥（绝不提交！）
+.env
+
+# Node（阶段 4 前后端联调时会用到）
+node_modules/
+dist/
+
+# 编辑器与操作系统产生的杂物
+.vscode/
+.DS_Store
+Thumbs.db
