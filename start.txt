@@ -1,0 +1,3 @@
+cd "D:\DSH projects\todo-app"
+.\.venv\Scripts\Activate.ps1
+uvicorn main:app --reload
