@@ -61,3 +61,11 @@ def delete_todo(id: int):
             todos.remove(todo)
             return
     raise HTTPException(status_code=404, detail="任务不存在")
+
+@app.post("/todos/{id}/toggle")
+def toggle_todo(id: int):
+    for todo in todos:
+        if todo["id"] == id:
+            todo["done"] = not todo["done"]
+            return todo
+    raise HTTPException(status_code=404, detail="任务不存在")
