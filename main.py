@@ -1,7 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from database import get_connection, init_db      # ← 新增
 
 app = FastAPI()
+
+init_db()          # ← 新增：应用启动时建表（已存在则什么都不做）
 
 class TodoCreate(BaseModel):
     """新增任务时，客户端要提供的数据"""

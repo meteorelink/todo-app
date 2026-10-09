@@ -1,3 +1,6 @@
-cd "D:\DSH projects\todo-app"
-.\.venv\Scripts\Activate.ps1
-uvicorn main:app --reload
+# 一键启动待办清单后端
+# 用法：在本目录下执行  .\start.ps1
+
+Set-Location $PSScriptRoot              # 切到脚本所在目录
+.\.venv\Scripts\Activate.ps1            # 激活虚拟环境
+uvicorn main:app --reload               # 启动服务器
