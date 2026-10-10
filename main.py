@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from database import get_connection, init_db      # ← 新增
 
+#test
 app = FastAPI()
 
 init_db()          # ← 新增：应用启动时建表（已存在则什么都不做）
@@ -17,13 +18,13 @@ class TodoUpdate(BaseModel):
     title: str
     done: bool
 
-# 假数据：写死在代码里的任务列表
-todos = [
-    {"id": 1, "title": "写实验报告", "done": False},
-    {"id": 2, "title": "复习数据结构", "done": True},
-    {"id": 3, "title": "跑步 30 分钟", "done": False},
-]
-
+def row_to_todo(row):
+    """把数据库的一行，转成 API 要返回的字典"""
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "done": bool(row["done"]),      # ← 0/1 → False/True
+    }
 
 @app.get("/")
 def read_root():
@@ -32,43 +33,67 @@ def read_root():
 
 @app.get("/todos")
 def read_todos():
-    return todos
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM todos ORDER BY id").fetchall()
+    conn.close()
+    return [row_to_todo(r) for r in rows]
 
 @app.get("/todos/{id}")
 def read_one_todo(id: int):
-    for todo in todos:
-        if todo["id"] == id:
-            return todo
-    raise HTTPException(status_code=404, detail="任务不存在")
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM todos WHERE id = ?", (id,)).fetchone()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return row_to_todo(row)
+
 
 @app.post("/todos", status_code=201)
 def create_todo(todo: TodoCreate):
-    new_id = max([t["id"] for t in todos], default=0) + 1
-    new_todo = {"id": new_id, "title": todo.title, "done": todo.done}
-    todos.append(new_todo)
-    return new_todo
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO todos (title, done) VALUES (?, ?)",
+        (todo.title, int(todo.done)),
+    )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id, "title": todo.title, "done": todo.done}
+
 
 @app.put("/todos/{id}")
 def update_todo(id: int, todo: TodoUpdate):
-    for t in todos:
-        if t["id"] == id:
-            t["title"] = todo.title
-            t["done"] = todo.done
-            return t
-    raise HTTPException(status_code=404, detail="任务不存在")
+    conn = get_connection()
+    conn.execute(
+        "UPDATE todos SET title = ?, done = ? WHERE id = ?",
+        (todo.title, int(todo.done), id),
+    )
+    row = conn.execute("SELECT * FROM todos WHERE id = ?", (id,)).fetchone()
+    conn.commit()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return row_to_todo(row)
+
 
 @app.delete("/todos/{id}", status_code=204)
 def delete_todo(id: int):
-    for todo in todos:
-        if todo["id"] == id:
-            todos.remove(todo)
-            return
-    raise HTTPException(status_code=404, detail="任务不存在")
+    conn = get_connection()
+    cur = conn.execute("DELETE FROM todos WHERE id = ?", (id,))
+    conn.commit()
+    changed = cur.rowcount
+    conn.close()
+    if changed == 0:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
 
 @app.post("/todos/{id}/toggle")
 def toggle_todo(id: int):
-    for todo in todos:
-        if todo["id"] == id:
-            todo["done"] = not todo["done"]
-            return todo
-    raise HTTPException(status_code=404, detail="任务不存在")
+    conn = get_connection()
+    conn.execute("UPDATE todos SET done = NOT done WHERE id = ?", (id,))
+    row = conn.execute("SELECT * FROM todos WHERE id = ?", (id,)).fetchone()
+    conn.commit()
+    conn.close()
+    if row is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return row_to_todo(row)
