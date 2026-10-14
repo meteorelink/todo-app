@@ -1,0 +1,52 @@
+body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    max-width: 480px;
+    margin: 40px auto;
+    padding: 0 16px;
+    background: #f7f7f8;
+    color: #222;
+}
+
+h1 { font-size: 24px; margin-bottom: 20px; }
+
+form { display: flex; gap: 8px; margin-bottom: 20px; }
+
+#new-title {
+    flex: 1;
+    padding: 10px 12px;
+    font-size: 15px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+}
+
+form button {
+    padding: 10px 18px;
+    font-size: 15px;
+    border: none;
+    border-radius: 6px;
+    background: #2563eb;
+    color: white;
+    cursor: pointer;
+}
+form button:hover { background: #1d4ed8; }
+
+#list { list-style: none; padding: 0; }
+
+#list li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    margin-bottom: 8px;
+    background: white;
+    border-radius: 6px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.06);
+}
+
+/* 已完成的任务：加删除线 + 变灰 */
+#list li.done .title {
+    text-decoration: line-through;
+    color: #999;
+}
+
+.title { flex: 1; }
