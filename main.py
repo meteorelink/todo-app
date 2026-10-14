@@ -1,9 +1,19 @@
-from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from database import get_connection, init_db      # ← 新增
 
-#test
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5500",     # 4A 的原生版本（保留，方便对照）
+        "http://127.0.0.1:5173",     # 4B 的 Vite
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 init_db()          # ← 新增：应用启动时建表（已存在则什么都不做）
 
