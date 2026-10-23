@@ -49,3 +49,37 @@ ul li.done .title {
 }
 
 .title { flex: 1; }
+
+
+/* ===== ③ 筛选按钮的样式 =====
+   结构来自 App.jsx 里的 <div className="filters"> 和里面三个 <button>
+*/
+
+.filters {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.filters button {
+    padding: 6px 14px;
+    font-size: 14px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: white;
+    color: #555;
+    cursor: pointer;
+}
+
+.filters button:hover {
+    border-color: #2563eb;
+    color: #2563eb;
+}
+
+/* 关键：当 filter 是某个值时，那个按钮会拿到 active 类 → 变成实心蓝
+   （className={filter === "all" ? "active" : ""} 的结果） */
+.filters button.active {
+    background: #2563eb;
+    color: white;
+    border-color: #2563eb;
+}
