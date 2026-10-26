@@ -1,0 +1,24 @@
+# ============================================================
+#  requirements-dev.txt —— 开发/测试专用依赖
+#
+#  和 requirements.txt 的区别：
+#    · requirements.txt      → 【运行】这个项目必须有的包（部署服务器时要装）
+#    · requirements-dev.txt  → 【开发/测试】才需要的包（部署时不需要）
+#
+#  为什么要分开？
+#    服务器上不需要 pytest，装了只是浪费空间和攻击面。
+#
+#  装法：
+#      pip install -r requirements-dev.txt
+#
+#  它第一行的 -r 是"先把运行依赖也装上"，
+#  所以开发机只要这一条命令就够了。
+# ============================================================
+
+-r requirements.txt
+
+# 测试框架
+pytest==9.1.1
+
+# FastAPI 的 TestClient 需要它（它是 TestClient 背后的 HTTP 客户端）
+httpx==0.28.1

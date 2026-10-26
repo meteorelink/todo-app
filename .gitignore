@@ -5,6 +5,16 @@
 __pycache__/
 *.pyc
 
+# pytest 自动生成的缓存（可重新生成，不该提交）
+#   .pytest_cache/   —— pytest 记录"上次哪些测试失败过"之类
+#   pytest-of-<用户>/ —— 测试用的临时目录（tmp_path 的宿主）
+.pytest_cache/
+pytest-of-*/
+
+# 测试覆盖率报告（以后加 --cov 时会产生）
+.coverage
+htmlcov/
+
 # 数据库文件（含本地数据）
 *.db
 *.sqlite3

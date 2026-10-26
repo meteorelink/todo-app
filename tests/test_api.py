@@ -26,7 +26,16 @@ def client(tmp_path_factory):
     test_db = tmp_path_factory.mktemp("testdata") / "test.db"
     database.DB_FILE = test_db
 
-    import main  # ← 这时 init_db() 建的是【临时库】的表
+    import main  # noqa: F401  （只为拿到 main.app 这个对象）
+
+    # ⚠️ 光 import main 不够，这里必须显式建表。原因：
+    #    Python 的 import 是"只执行一次"的。
+    #    如果【别的测试文件】已经 import 过 main，
+    #    这次 import 就不会重新执行，main 里的 init_db() 也就不会跑，
+    #    测试库里就会【一张表都没有】→ 后面全部报 "no such table: todos"。
+    #    显式再调一次 init_db()（它是幂等的，重复调用无害），
+    #    这个 fixture 就【不再依赖测试文件的执行顺序】了。
+    database.init_db()
 
     return TestClient(main.app)
 
@@ -36,6 +45,22 @@ def clean_db(client):
     """每个测试开始前清空表 —— 保证测试之间互不影响"""
     conn = database.get_connection()
     conn.execute("DELETE FROM todos")
+
+    # ⚠️ 光 DELETE 不会重置自增计数器 —— 这正是"id 永不复用"的语义。
+    #    但测试需要"每次从同一个起点开始"，否则
+    #        assert body["id"] == 1
+    #    会取决于这个测试是第几个跑的（顺序一变就红）。
+    #
+    #    SQLite 把 AUTOINCREMENT 的当前值存在 sqlite_sequence 这张系统表里，
+    #    清掉它，下一个 insert 就又从 1 开始。
+    #
+    #    ⚠️ 注意：这只在【测试】里做 —— 生产代码绝不能这么干，
+    #       那等于把"id 永不复用"这个保证拆掉了。
+    try:
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'todos'")
+    except Exception:
+        pass   # 极端情况下这张系统表可能还没被创建，忽略即可
+
     conn.commit()
     conn.close()
 

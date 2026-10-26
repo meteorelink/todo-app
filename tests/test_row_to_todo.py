@@ -9,7 +9,7 @@
 
 import unittest
 
-from main import row_to_todo
+from models import row_to_todo
 
 
 class TestRowToTodo(unittest.TestCase):
