@@ -18,7 +18,7 @@ uvicorn main:app --reload
 #  终端 B：前端页面（Vite 开发服务器）
 #    页面地址：http://127.0.0.1:5173
 #
-#    ⚠️ Vite 打印的是 localhost，但请用 127.0.0.1 打开
+#     Vite 打印的是 localhost，但请用 127.0.0.1 打开
 #       （4B.5 起后端 CORS 需要精确匹配）
 # ---------------------------------------------------------------
 cd "D:\DSH projects\todo-app\web"
@@ -39,3 +39,8 @@ python -m http.server 5500
 #  · 改后端代码不用手动重启（--reload 会自动重启）
 #  · 改前端 html/css/js 只需在浏览器按 F5（必要时 Ctrl+F5 强刷）
 #  · 页面空白 / 点了没反应 → 第一件事：F12 → Console 看报错
+#  · AI 功能（"用一句话操作"）需要 .env 里的 DEEPSEEK_API_KEY
+#      ⚠️ 改了 .env 必须【手动重启】uvicorn：
+#         --reload 只监控 *.py，配置文件变了它不知道
+#  · 跑测试：.\.venv\Scripts\python.exe -m pytest -q
+#      集成测试要 uvicorn 开着才会绿（它们真的发 HTTP 请求）
