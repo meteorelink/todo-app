@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import todos
+from routers import ai, todos
 
 app = FastAPI()
 
@@ -45,6 +45,10 @@ init_db()
 #    以后加"用户"接口，就再写一行 app.include_router(users.router)，
 #    main.py 一个字都不用改结构。
 app.include_router(todos.router)
+
+# ⭐ AI 接口组。注意它和 todos 是完全独立的两个世界：
+#    todos 只碰数据库，ai 只碰模型，main.py 只负责把它们并排放好。
+app.include_router(ai.router)
 
 
 @app.get("/")
