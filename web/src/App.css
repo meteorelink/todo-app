@@ -19,6 +19,15 @@ form input {
     border-radius: 6px;
 }
 
+/* ⭐ 日期框不参与"抢宽度"。
+   上面 form input 的 flex: 1 会让【每个】input 平分剩余空间，
+   于是日期框会和标题框一样宽，把标题挤掉一半。
+   给它 flex: 0 0 auto = "宽度按内容算，别伸缩"。 */
+form input[type="date"] {
+    flex: 0 0 auto;
+    color: #444;
+}
+
 form button {
     padding: 10px 18px;
     font-size: 15px;
@@ -82,4 +91,216 @@ ul li.done .title {
     background: #2563eb;
     color: white;
     border-color: #2563eb;
+}
+
+
+/* ===== ④ AI 预览卡片的样式 =====
+   结构来自 AiPreview.jsx：.ai-preview > .ai-preview-hint / .ai-note / ul / .ai-preview-actions
+*/
+
+h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #555;
+    margin: 28px 0 10px;
+}
+
+/* 整张卡片用浅蓝底，这样里面白色的 <li> 才看得出来 */
+.ai-preview {
+    background: #eef4ff;
+    border: 1px solid #d6e2f7;
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 24px;
+}
+
+.ai-preview-hint {
+    margin: 0 0 10px;
+    font-size: 14px;
+    color: #333;
+}
+
+/* 模型附带的说明（"只是闲聊天气"之类）—— 用小字斜体，弱化处理 */
+.ai-note {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: #777;
+    font-style: italic;
+}
+
+/* 优先级徽章 */
+.pri {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: #e5e7eb;
+    color: #555;
+    flex-shrink: 0;
+}
+
+.pri-high {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.pri-low {
+    background: #e0f2fe;
+    color: #0369a1;
+}
+
+/* 截止日期 */
+.due {
+    font-size: 13px;
+    color: #888;
+    flex-shrink: 0;
+}
+
+/* 逾期且未完成 —— 标红提醒。
+   注意这是 .due.overdue（两个类同时存在），优先级比单独 .due 高 */
+.due.overdue {
+    color: #dc2626;
+    font-weight: 600;
+}
+
+.ai-preview-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.ai-preview-actions button {
+    padding: 8px 16px;
+    font-size: 14px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+/* 主按钮：确认创建 */
+.ai-preview-actions button:first-child {
+    background: #16a34a;
+    color: white;
+}
+.ai-preview-actions button:first-child:hover { background: #15803d; }
+.ai-preview-actions button:first-child:disabled { background: #9ca3af; cursor: not-allowed; }
+
+/* 次按钮：取消 */
+.ai-preview-actions button:last-child {
+    background: white;
+    color: #555;
+    border: 1px solid #ddd;
+}
+.ai-preview-actions button:last-child:hover { border-color: #999; }
+/* ============================================================
+   8.6 助手面板
+   ============================================================ */
+
+/* 一句提示：告诉用户两个按钮的区别。
+   它不是装饰，是【契约说明】—— 用户按下之前得知道会发生什么。 */
+.ai-hint {
+    font-size: 13px;
+    color: #666;
+    margin: 6px 0 12px;
+    line-height: 1.5;
+}
+
+.agent-panel {
+    margin-top: 16px;
+    padding: 16px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+}
+
+/* ① 它说的话：这是最该被读的一句，字号大一点 */
+.agent-reply {
+    margin: 0 0 12px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #1f2937;
+}
+
+/* ② 它做的事：灰的、小的 —— 视觉上要说"这已经结束了，不用你管" */
+.agent-actions {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+    font-size: 13px;
+    color: #555;
+}
+
+.agent-actions li {
+    padding: 4px 0;
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+}
+
+.agent-actions .mark {
+    font-weight: 700;
+    width: 14px;
+    flex-shrink: 0;
+}
+
+.agent-actions li.ok .mark { color: #16a34a; }
+.agent-actions li.fail { color: #b91c1c; }
+.agent-actions li.fail .mark { color: #b91c1c; }
+
+/* ③ 它想做的事：必须一眼看出"还没发生"。
+   所以用红色左边框 + 浅黄底，和上面灰扑扑的回执明确区分开。 */
+.agent-proposal {
+    margin: 12px 0;
+    padding: 12px;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-left: 4px solid #f59e0b;
+    border-radius: 6px;
+}
+
+.agent-proposal p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.agent-proposal-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: #92400e;
+}
+
+.agent-proposal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.agent-proposal-actions button {
+    padding: 7px 16px;
+    font-size: 14px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+/* 删除：红色实心。它是整条链路上唯一会真的删东西的按钮，必须显眼且不可误触。 */
+.agent-proposal-actions .danger {
+    background: #dc2626;
+    color: white;
+    border: none;
+}
+.agent-proposal-actions .danger:hover { background: #b91c1c; }
+
+/* 保留：白色描边 —— 默认选项应该是"不动" */
+.agent-proposal-actions button:not(.danger) {
+    background: white;
+    color: #555;
+    border: 1px solid #ddd;
+}
+.agent-proposal-actions button:not(.danger):hover { border-color: #999; }
+
+.agent-meta {
+    margin: 12px 0 0;
+    font-size: 12px;
+    color: #9ca3af;
 }

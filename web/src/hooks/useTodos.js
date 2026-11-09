@@ -58,22 +58,53 @@ export function useTodos() {
 
     // ---------- 增 / 改 / 删 ----------
     //
-    // ⭐ 注意 addTodo 的参数：收的是【字符串 title】，不是事件对象 e。
+    // ⭐ 注意 addTodo 的参数：收的是【数据】（字符串 + 可选日期），不是事件对象 e。
     //    为什么？
     //      · "什么算合法标题"（trim、防空）是【界面】的判断
     //      · "怎么把标题发给后端"是【数据】的事
     //    分开了，这个 Hook 才能被别的地方复用 ——
-    //    比如以后加"AI 自动拆解任务"，它产出的也是字符串，直接调 addTodo 就行，
+    //    AI 拆解出的任务产出的也是这个形状，直接调 addTodo 就行，
     //    完全不需要一个 <form> 或一个事件对象。
-    async function addTodo(title) {
+    //
+    // ⭐ due 是可选参数（不传就是 undefined → 存 null = 没有截止日）。
+    //    为什么要给默认值？因为绝大多数调用方只关心标题 ——
+    //    让"不需要日期"的情况写起来跟以前一模一样，是一次向后兼容。
+    async function addTodo(title, due = null) {
         // POST 请求要带三样：method / headers / body
         await fetch(`${API}/todos`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             // body 要的是【字符串】。JSON.stringify 把对象转成 JSON 文本
-            body: JSON.stringify({ title: title, done: false }),
+            //
+            // ⚠️ due 用 `due || null` 而不是直接传 due：
+            //    <input type="date"> 没填的时候值是【空字符串 ""】，
+            //    直接发过去后端会当成"有个空的日期"→ 422。
+            //    空字符串在布尔判断里是 false，所以 `|| null` 把它变成"没有"。
+            body: JSON.stringify({ title: title, done: false, due: due || null }),
         });
         await reload();                // 重新拉一遍，让列表更新
+    }
+
+    // ---------- 批量创建（AI 草稿"确认"之后走这条） ----------
+    //
+    // ⭐ 为什么参数是【数组】，而不是在 App 里循环调用 addTodo？
+    //
+    //   因为"用户确认了一次"是**一个**动作。
+    //   如果循环调 addTodo，就变成 N 个请求：
+    //   第 2 条失败时，第 1 条已经进库了 → 界面上出现"半成功"——
+    //   而这正是上次讨论批量接口时说要避免的第三种状态。
+    //   后端 /todos/batch 用一次事务保证"要么全进，要么全不进"，
+    //   前端也必须用一次请求去配合它。
+    async function addMany(tasks) {
+        const res = await fetch(`${API}/todos/batch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tasks: tasks }),
+        });
+        if (!res.ok) {
+            throw new Error(`批量创建失败：服务器返回 ${res.status}`);
+        }
+        await reload();
     }
 
     async function toggleTodo(id) {
@@ -82,7 +113,17 @@ export function useTodos() {
     }
 
     async function deleteTodo(id) {
-        await fetch(`${API}/todos/${id}`, { method: "DELETE" });
+        const res = await fetch(`${API}/todos/${id}`, { method: "DELETE" });
+
+        // ⭐ 404 要当成成功。
+        //    404 的意思是"这条已经没了"，而我们的目的就是"让它没了" ——
+        //    目的已经达到了。把它当失败，会让用户盯着一句
+        //    "任务不存在"发呆："可它刚刚还在我眼前啊。"
+        //    （这叫幂等：调用一次和调用三次，结果一样。）
+        if (!res.ok && res.status !== 404) {
+            throw new Error(`删除失败：服务器返回 ${res.status}`);
+        }
+
         await reload();
     }
 
@@ -93,6 +134,7 @@ export function useTodos() {
         loading,
         error,
         addTodo,
+        addMany,       // 批量创建（AI 草稿确认后用它）
         toggleTodo,
         deleteTodo,
         reload,        // 暴露出来，以后想做"出错后点重试"直接用它
