@@ -48,6 +48,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 import ai_client
+import conversations
 from models import Priority, TodoCreate
 from routers import todos as todos_router
 
@@ -447,6 +448,13 @@ class AgentResult(BaseModel):
     #       状态码和 body 不能用彼此代替。
     truncated: bool = False
 
+    # ⭐ conversation_id = 这次对话的编号。前端要把它存起来，下一句再发回来。
+    #
+    #    ⚠️ 它是【响应】的一部分，不只是"内部参数"——
+    #       因为第一次调用时前端手里还没有 id，必须由后端给它一个。
+    #       这跟登录返回 token 是同一个道理：第一次你来拿，之后你带回来。
+    conversation_id: str = ""
+
 
 # ============================================================
 #  ⑥ 执行一次工具调用
@@ -600,11 +608,124 @@ def build_system_prompt(today: date | None = None) -> str:
 
 
 # ============================================================
+#  ⑦-补 存库之前：洗成"下次还能发出去"的形状
+# ============================================================
+
+def _storable(messages: list[dict]) -> list[dict]:
+    """把 messages 过滤成"下次还能原样发出去"的样子。
+
+    两件事：
+      ① 去掉 system（它含今天的日期，必须每次现拼）
+      ② 去掉【不完整的一组】工具调用
+
+    ⭐ "不完整的一组"是怎么来的？
+
+       如果 _execute_call 抛了系统级异常（比如数据库被锁住），
+       这一刻 messages 里已经有了一条 assistant(tool_calls)，
+       但它对应的 tool 回执还没来得及 append 上去 —— 异常把循环打断了。
+
+       这种残局存进库，下一次请求必然 400：
+         An assistant message with 'tool_calls' must be followed by
+         tool messages responding to each tool_call_id
+
+    ⭐ 所以这里有一条硬约束：**存进去的东西，必须是能再次发出去的。**
+       不在存的这一端检查，坏数据就会在你最不希望的时候炸 ——
+       通常是第二天用户打开会话的那一刻。
+    """
+    out: list[dict] = []
+    i = 0
+
+    while i < len(messages):
+        m = messages[i]
+
+        if m.get("role") == "system":
+            i += 1
+            continue
+
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            wanted = {c["id"] for c in m["tool_calls"]}
+
+            # 紧跟在后面的 tool 消息，就是这一批调用的回执。
+            j = i + 1
+            answered = set()
+            while j < len(messages) and messages[j].get("role") == "tool":
+                answered.add(messages[j].get("tool_call_id"))
+                j += 1
+
+            if not wanted <= answered:
+                # 有调用没等到回执 → 整组丢掉（assistant + 已收到的部分 tool）。
+                # ⚠️ 不能只丢 assistant：留下的 tool 消息找不到"爸爸"，一样 400。
+                i = j
+                continue
+
+            out.append(m)
+            out.extend(messages[i + 1:j])
+            i = j
+            continue
+
+        out.append(m)
+        i += 1
+
+    return out
+
+
+# ============================================================
 #  ⑧ 主循环 ← 这就是 agent
 # ============================================================
 
-def run_agent(user_text: str, api_key: str) -> AgentResult:
-    """让模型自己决定做什么，直到它不再要工具（或者轮次用完）。
+def run_agent(
+    user_text: str,
+    api_key: str,
+    conversation_id: str | None = None,
+) -> AgentResult:
+    """带记忆地跑一次。
+
+    ⭐ 这个函数只干三件事，一行循环逻辑都没有：
+
+        ① 找出这次对话的历史        （读）
+        ② 拼成完整 messages，交给 _run_turns  （跑）
+        ③ 不管跑成没跑成，存回去      （写）
+
+    ⚠️ 为什么拆两层？
+       因为"记忆的生命周期"和"这一轮怎么转"是两件不同的事。
+       混在一起写，那个 for 循环会被 load / save / trim 埋掉，
+       出问题时就分不清是【循环写错了】还是【历史读错了】。
+
+    ⭐ 参数 conversation_id 为 None = 第一次说话。
+       之后前端把响应里的 conversation_id 原样发回来，就接上了。
+    """
+    cid = conversation_id or conversations.new_id()
+
+    # 读历史：
+    #   · 不存在 / 过期 → load 返回 None → 当作新对话（用户不会因此看到报错）
+    #   · 超过 3 轮     → trim 只留最近 3 轮
+    history = conversations.trim(conversations.load(cid) or [])
+
+    messages: list[dict] = [
+        # ⚠️⚠️ system 每次现拼，绝不从库里读 —— 它含今天的日期。
+        {"role": "system", "content": build_system_prompt()},
+        *history,
+        {"role": "user", "content": user_text},
+    ]
+
+    try:
+        return _run_turns(messages, api_key, cid)
+    finally:
+        # ⚠️ 为什么是 finally，而不是"成功才存"？
+        #
+        #    因为工具可能【已经动过数据库】了。哪怕这一轮最后失败了，
+        #    历史里也必须留下"我建了 #36"。
+        #    否则用户下一句问"刚才那条呢"，模型一脸茫然，
+        #    而数据库里明明有 —— 这才是最难查的那种 bug。
+        conversations.save(cid, conversations.trim(_storable(messages)))
+
+
+def _run_turns(
+    messages: list[dict],
+    api_key: str,
+    conversation_id: str,
+) -> AgentResult:
+    """主循环：问模型 → 执行工具 → 把结果喂回去，最多 MAX_TURNS 轮。
 
     ⭐ 整个函数就是一张图：
 
@@ -615,11 +736,11 @@ def run_agent(user_text: str, api_key: str) -> AgentResult:
         执行 → 把结果喂回去
           ↓
         （回到顶部，最多 MAX_TURNS 次）
+
+    ⚠️ messages 是【传进来的】，而且会被就地修改。
+       这是故意的：调用方（run_agent）要靠这个列表拿到"这一轮新增了什么"，
+       才能在 finally 里把它存起来。
     """
-    messages: list[dict] = [
-        {"role": "system", "content": build_system_prompt()},
-        {"role": "user", "content": user_text},
-    ]
     actions: list[ToolAction] = []
     proposals: list[DeleteProposal] = []
 
@@ -633,7 +754,25 @@ def run_agent(user_text: str, api_key: str) -> AgentResult:
         # ---------- 它不再要工具了：这次对话结束 ----------
         if not calls:
             reply = (message.get("content") or "").strip()
-            return AgentResult(reply=reply, actions=actions, turns=turn, proposals=proposals)
+
+            # ⚠️⚠️ 它说的这句话也必须进 messages，否则【存不进库】。
+            #
+            #    这是加记忆时最容易漏的一行：循环在这里就 return 了，
+            #    而存库发生在 run_agent 的 finally 里 —— 你不 append，
+            #    历史里就只有"用户说了什么"和"工具做了什么"，
+            #    没有"助手怎么回答的"。
+            #
+            #    后果：下一轮模型看到"我提的那句话之后什么都没有"，
+            #    于是它会把同一件事又做一遍。
+            messages.append({"role": "assistant", "content": reply})
+
+            return AgentResult(
+                reply=reply,
+                actions=actions,
+                turns=turn,
+                proposals=proposals,
+                conversation_id=conversation_id,
+            )
 
         # ---------- 它要调工具 ----------
         #
@@ -704,6 +843,7 @@ def run_agent(user_text: str, api_key: str) -> AgentResult:
         turns=MAX_TURNS,
         truncated=True,
         proposals=proposals,
+        conversation_id=conversation_id,
     )
 
 

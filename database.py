@@ -47,6 +47,24 @@ def init_db():
         )
     """)
 
+    # ⭐ 第二张表：多轮对话的"记忆"（见 conversations.py）
+    #
+    #    ⚠️ 为什么这里不需要 _migrate 那样的补列逻辑？
+    #       因为这是一张【新的】表。`IF NOT EXISTS` 对"第一次建"是完全够用的：
+    #       表不存在 → 建；存在 → 跳过。
+    #
+    #       只有当"表已经存在、但你想加列"的时候，IF NOT EXISTS 才会静默失效，
+    #       那才需要 ALTER TABLE（就是上面 _migrate 干的事）。
+    #       换句话说：新建表用 CREATE，改老表用 ALTER，两件事不要混。
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            id         TEXT PRIMARY KEY,          -- uuid4().hex，猜不出来
+            messages   TEXT NOT NULL,             -- 整个 messages 数组的 JSON
+            created_at TEXT NOT NULL,             -- ISO 时间，带时区
+            updated_at TEXT NOT NULL              -- 用来判断过期
+        )
+    """)
+
     _migrate(conn)
 
     conn.commit()   # 建表也是写操作，也要 commit

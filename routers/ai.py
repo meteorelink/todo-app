@@ -35,6 +35,7 @@ from typing import TypeVar
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+import conversations
 from ai_agent import AgentFailed, AgentResult, run_agent
 from ai_client import (
     AIConfigError,
@@ -100,6 +101,30 @@ class AIRequest(BaseModel):
         if isinstance(v, str):
             return v.strip()
         return v
+
+
+class AgentRequest(AIRequest):
+    """助手接口的请求体 = 一句话 + 可选的会话编号。
+
+    ⭐ 为什么用【继承】而不是直接往 AIRequest 里加一个可选字段？
+
+       因为 /ai/parse 是【无状态】的：它每次都从头理解一句话，
+       同一个输入永远得到同一个输出。它不需要记忆，也不该有记忆。
+
+       如果 conversation_id 加在共享的 AIRequest 上，那么调用方
+       给 /ai/parse 传了这个字段，它会被【静默忽略】——
+       调用方以为自己接上了上下文，其实没有。
+       这又是一次"不报错，但行为和你以为的不一样"。
+
+    ⭐ 规则：**一个字段只出现在真正用它的那个请求模型里。**
+       共享的基类只放真正共享的东西。
+    """
+
+    conversation_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="上一次响应里返回的会话编号；第一次对话不传",
+    )
 
 
 # ============================================================
@@ -228,7 +253,7 @@ def parse_endpoint(payload: AIRequest) -> ParseResult:
 # ============================================================
 
 @router.post("/ai/agent", response_model=AgentResult)
-def agent_endpoint(payload: AIRequest) -> AgentResult:
+def agent_endpoint(payload: AgentRequest) -> AgentResult:
     """让模型自己决定调哪个工具，把事情直接做掉。
 
     ⭐ 和 /ai/parse 的根本区别：
@@ -248,4 +273,68 @@ def agent_endpoint(payload: AIRequest) -> AgentResult:
        轮询/推送。我们这里 5 轮封顶（十几次工具调用以内），
        放在请求里还撑得住。
     """
-    return _call_ai(lambda api_key: run_agent(payload.text, api_key))
+    return _call_ai(
+        lambda api_key: run_agent(
+            payload.text, api_key, conversation_id=payload.conversation_id
+        )
+    )
+
+
+# ============================================================
+#  会话管理（多轮记忆的"副作用"接口）
+#
+#  ⭐ 为什么会话要单独给两个接口？
+#
+#     因为"记忆"本身是【有状态的】，而 HTTP 请求是【无状态的】。
+#     一旦引入了跨请求的状态，就必须给用户一个能看见它、能清掉它的口子：
+#
+#        GET    → 我现在这段对话里到底存了什么？（看得见）
+#        DELETE → 我不想接着说了，忘掉它   （清得掉）
+#
+#     ⚠️ 没有这两个口子，用户就只有一个办法清上下文：等 24 小时。
+#        而且他自己还不知道发生了什么。
+# ============================================================
+
+class ConversationView(BaseModel):
+    """一段对话的样子（给调试和教学用的，前端界面不依赖它）。"""
+
+    id: str
+    message_count: int
+    messages: list[dict] = Field(default_factory=list)
+
+
+@router.get("/ai/conversations/{conversation_id}", response_model=ConversationView)
+def get_conversation(conversation_id: str) -> ConversationView:
+    """看看这段对话里存了什么。
+
+    ⭐ 这个接口最有用的时候是你怀疑"模型为什么这么说"——
+       把 messages 打印出来，往往一眼就能看出：它根本没看到你以为它看到了的东西。
+
+    ⚠️ 它把原始 messages 完整吐出来（含 tool_calls 和 tool 回执）。
+       真产品不该这样（会有隐私问题），这里是为了看得见。
+    """
+    messages = conversations.load(conversation_id)
+    if messages is None:
+        # 不存在 和 已过期 是同一件事：对它来说，这段对话都没了。
+        raise HTTPException(status_code=404, detail="会话不存在或已过期")
+
+    return ConversationView(
+        id=conversation_id,
+        message_count=len(messages),
+        messages=messages,
+    )
+
+
+@router.delete("/ai/conversations/{conversation_id}", status_code=204)
+def delete_conversation(conversation_id: str):
+    """忘掉这段对话。
+
+    ⭐ 返回 204 而【不是 404】——即使它本来就不存在。
+
+       因为用户的目的只有一个："之后别再看见这段历史"。
+       目的达到了，就是成功。
+       如果因为"本来就没有"报 404，前端反而要去处理一个
+       对用户毫无意义的错误（"我想清空，你说没有可清空的"）。
+    """
+    conversations.delete(conversation_id)
+    # 204 不返回任何东西

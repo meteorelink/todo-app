@@ -65,6 +65,7 @@ database.DB_FILE = test_dir / "test.db"
 
 import ai_agent            # noqa: E402
 import ai_client           # noqa: E402
+import conversations       # noqa: E402
 from models import TodoCreate          # noqa: E402
 from routers import todos as todos_router   # noqa: E402
 
@@ -81,6 +82,9 @@ def clean_db():
     # ⚠️ DELETE 不会重置自增计数器，不清掉的话
     #    第二个测试里第一条任务的 id 就是 2，断言语义就乱了。
     conn.execute("DELETE FROM sqlite_sequence WHERE name='todos'")
+    # 会话表也要清 —— 否则上一个测试留下的对话会跟着下一个测试跑，
+    # "为什么这个测试里模型看到了一堆它没说过的话"会非常难查。
+    conn.execute("DELETE FROM conversations")
     conn.commit()
     conn.close()
     yield
@@ -533,3 +537,161 @@ def test_every_tool_schema_has_a_description():
         fn = tool["function"]
         assert fn.get("description", "").strip(), f"{fn['name']} 没有 description"
         assert "parameters" in fn
+
+
+# ============================================================
+#  ⑩ 多轮记忆
+#
+#  ⭐ 这一组测的是"记忆"能带来的那个效果本身：
+#     第二句话能不能接上第一句。
+#
+#  ⚠️ 注意这里的断言方式和别的测试不一样：
+#     别的测试断言"结果对不对"，这里断言【模型第二次看到了什么】。
+#     因为"记得"这个能力不在模型里，也不在我们的返回值里 ——
+#     它只存在于"我们发过去的 messages 里"。
+#     所以唯一的验证方式就是：把那个 messages 抓下来看。
+# ============================================================
+
+def test_first_call_creates_a_conversation(fake_model):
+    fake_model([says("好的。")])
+
+    result = ai_agent.run_agent("随便说一句", "fake-key")
+
+    assert len(result.conversation_id) == 32      # uuid4().hex
+    # 而且真的落库了，不只是返回了一个字符串
+    assert conversations.load(result.conversation_id) is not None
+
+
+def test_second_turn_sees_the_first_turn(fake_model):
+    """⭐⭐ 多轮记忆的核心断言。
+
+    第一轮说"第一句话"，第二轮只说"第二句话"——
+    模型第二轮的请求里，必须能同时看到【第一句】和【它的回答】。
+    看不到，它就是个失忆的助手。
+    """
+    calls = fake_model([says("收到第一句。"), says("收到第二句。")])
+
+    first = ai_agent.run_agent("第一句话", "fake-key")
+    second = ai_agent.run_agent(
+        "第二句话", "fake-key", conversation_id=first.conversation_id
+    )
+
+    assert second.conversation_id == first.conversation_id
+
+    # 第二次请求实际发出去的 messages
+    sent = calls[1]
+    contents = [m.get("content") for m in sent]
+
+    assert "第一句话" in contents
+    assert "收到第一句。" in contents
+    assert "第二句话" in contents           # 新的一句也在
+
+    # 而且顺序是：system → 历史 → 新的 user
+    assert sent[0]["role"] == "system"
+    assert sent[-1] == {"role": "user", "content": "第二句话"}
+
+
+def test_different_conversations_do_not_see_each_other(fake_model):
+    """⚠️ 记忆最容易出的泄漏：A 的对话跑到 B 的请求里。
+
+       我们这里每个会话是一行独立记录，按 id 取，
+       但"忘了传 id"或"传了默认值"都会导致串话。
+    """
+    calls = fake_model([says("A 的回答"), says("B 的回答")])
+
+    a = ai_agent.run_agent("苹果", "fake-key")     # 不给 id → 新会话
+    b = ai_agent.run_agent("香蕉", "fake-key")     # 又新开一个
+
+    assert a.conversation_id != b.conversation_id
+
+    sent_b = [m.get("content") for m in calls[1]]
+    assert "苹果" not in sent_b
+    assert "A 的回答" not in sent_b
+
+
+def test_system_prompt_is_never_stored(fake_model):
+    """⭐⭐ system prompt 里含【今天的日期】，存进库明天就是错的。
+
+       这是我们 8.2 修过的坑，换了个地方不能复发。
+    """
+    fake_model([says("嗯。")])
+
+    result = ai_agent.run_agent("随便", "fake-key")
+    stored = conversations.load(result.conversation_id)
+
+    assert all(m["role"] != "system" for m in stored)
+    # 库里的第一条应该是用户说的话
+    assert stored[0] == {"role": "user", "content": "随便"}
+
+
+def test_history_keeps_tool_calls_and_receipts(fake_model):
+    """历史里必须同时有 assistant(tool_calls) 和 tool 回执。
+
+    ⭐ 少任何一样，下一轮模型就不知道"#1 是哪来的"，
+       或者协议直接 400。
+    """
+    fake_model([
+        wants_tool("call_1", "create_todo", '{"title": "买牛奶"}'),
+        says("已创建"),
+    ])
+
+    result = ai_agent.run_agent("买牛奶", "fake-key")
+    stored = conversations.load(result.conversation_id)
+
+    assert [m["role"] for m in stored] == ["user", "assistant", "tool", "assistant"]
+    assert stored[1]["tool_calls"][0]["id"] == "call_1"
+    assert stored[2]["tool_call_id"] == "call_1"
+    # 工具的真实结果也在里面 —— 这就是模型下一轮"知道"#1 存在的唯一原因
+    assert "买牛奶" in stored[2]["content"]
+
+    # ⚠️ 思考原文不能存：白占 token，某些模型还会直接 400
+    assert "reasoning_content" not in stored[1]
+
+
+def test_only_the_last_three_turns_are_kept(fake_model):
+    """说 4 句，只留最近 3 句。第 1 句应该被挤出去。"""
+    fake_model([says("a"), says("b"), says("c"), says("d")])
+
+    cid = None
+    for text in ["第1句", "第2句", "第3句", "第4句"]:
+        result = ai_agent.run_agent(text, "fake-key", conversation_id=cid)
+        cid = result.conversation_id
+
+    stored = conversations.load(cid)
+    said = [m["content"] for m in stored if m["role"] == "user"]
+
+    assert said == ["第2句", "第3句", "第4句"]
+
+
+def test_incomplete_tool_group_is_not_stored(fake_model, monkeypatch):
+    """⭐⭐ 最难想到的一种坏数据。
+
+       工具执行到一半，代码抛了【系统级】异常（不是"模型能改"的那种）。
+       这时 messages 里已经有 assistant(tool_calls)，但 tool 回执还没 append。
+
+       如果原样存进去，这份历史明天打开时就会 400。
+       所以存之前必须洗一遍。
+    """
+    def broken_create(payload):
+        raise RuntimeError("database is locked（模拟）")
+
+    monkeypatch.setattr(todos_router, "create_todo", broken_create)
+    fake_model([wants_tool("call_x", "create_todo", '{"title": "买牛奶"}')])
+
+    with pytest.raises(RuntimeError):
+        ai_agent.run_agent("买牛奶", "fake-key", conversation_id="fixed-cid")
+
+    stored = conversations.load("fixed-cid")
+
+    assert stored is not None            # 历史还是存了（用户那句话得留下）
+    assert all(m["role"] != "tool" for m in stored)
+    assert all(not m.get("tool_calls") for m in stored)
+    assert [m["content"] for m in stored] == ["买牛奶"]
+
+    # ⭐ 最关键的一步：这份洗过的历史必须【真的能再发一次】。
+    #    只断言"少了坏东西"是不够的 —— 得证明剩下的东西是能用的。
+    fake_model([says("好的，再来一次。")])
+    again = ai_agent.run_agent("再说一次", "fake-key", conversation_id="fixed-cid")
+
+    assert again.conversation_id == "fixed-cid"
+    assert again.reply == "好的，再来一次。"
