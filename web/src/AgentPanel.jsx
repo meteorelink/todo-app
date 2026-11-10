@@ -15,7 +15,7 @@
 //     如果 ② 和 ③ 长得一样，用户就会把"想删"当成"删了"。
 // ============================================================
 
-export default function AgentPanel({ result, onConfirmDelete, onDismiss }) {
+export default function AgentPanel({ result, onConfirmDelete, onDismiss, continued = false }) {
     if (!result) return null;
 
     const { reply, actions, turns, truncated, proposals } = result;
@@ -70,6 +70,10 @@ export default function AgentPanel({ result, onConfirmDelete, onDismiss }) {
 
             <p className="agent-meta">
                 用了 {turns} 轮 · {actions.length} 次工具调用
+                {/* ⭐ 这一行是给【人】看的，不是给程序看的。
+                    它证明"记忆"真的接上了 —— 没有这句话，
+                    用户没法分辨"它记得"和"它猜得准"。 */}
+                {continued ? " · 接上了之前的话" : " · 新对话"}
             </p>
         </div>
     );

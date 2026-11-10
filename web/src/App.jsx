@@ -26,7 +26,7 @@ import "./App.css";
 function App() {
     // ---------- 数据：全部来自自定义 Hook ----------
     // 一行拿到五样东西，不需要知道它们是怎么来的
-    const { todos, loading, error, addTodo, addMany, toggleTodo, deleteTodo } = useTodos();
+    const { todos, loading, error, addTodo, addMany, toggleTodo, deleteTodo, reload } = useTodos();
 
     // ---------- AI 解析：另一组独立的状态 ----------
     //
@@ -129,7 +129,22 @@ function App() {
         if (t === "") return;
         setAiConfirmError(null);
         ai.discardDraft();        // 两条路互斥：走助手就不要再留着预览草稿
-        await agent.run(t);
+        const result = await agent.run(t);
+
+        // ⭐⭐ 它真的动过库，就得把列表重新拉一遍 —— 这一行是当初漏掉的。
+        //
+        //   漏掉的后果很典型：助手说"已标记为完成"，后端也确实改了，
+        //   但界面还是旧样子，用户必须按 F5 才看得见。
+        //   这种 bug 特别难自查，因为【后台是对的】—— 错的是前端没去问。
+        //
+        // ⚠️ 但不是每次都刷：list_todos 是只读的，调它不会改变任何数据。
+        //    刷一次要发一个请求，还会把 loading 打回 true 让列表闪一下 ——
+        //    什么都没变就不值得做。
+        //    判据不是"它说了几句话"，而是"它有没有真的动手"。
+        const wrote = result?.actions?.some(a => a.ok && a.tool !== "list_todos");
+        if (wrote) {
+            await reload();
+        }
     }
 
     // ---------- 列表里那个"删除"按钮 ----------
@@ -161,6 +176,19 @@ function App() {
             // 删失败就【保留】这条询问，用户还能再点一次
             setAiConfirmError(err.message);
         }
+    }
+
+    // ---------- 换个话题：把记忆清掉 ----------
+    //
+    //  ⚠️ 为什么需要这个按钮？因为记忆是把双刃剑：
+    //     上一段对话在聊"实验报告"，你现在说"那个不用了"，
+    //     模型会顺着上文理解成"实验报告不用了" —— 这是它尽责，不是它犯傻。
+    //     用户需要一个明确的出口来表达"我们换个话题"，
+    //     否则他只能刷新页面（而刷新是个连自己都解释不清的动作）。
+    function handleNewConversation() {
+        agent.newConversation();
+        setAiConfirmError(null);
+        setAiText("");
     }
 
     // ---------- 描述界面 ----------
@@ -238,6 +266,22 @@ function App() {
                 「先预览」不会写库，你确认后才创建；「交给助手」它自己判断并直接执行（删东西仍会先问你）。
             </p>
 
+            {/* ===== 对话状态 =====
+                助手现在会记住这次对话里说过的话：后端按 conversation_id
+                把 messages 存进 conversations 表，下一句再取出来一起发。
+
+                所以"把买牛奶删掉" → 你点确认 → "那另一条呢" 能接上。
+                ⚠️ 但这也意味着：你换了话题它未必知道，它会顺着上文理解你。
+                   所以给一个明确的出口，比让它猜要诚实。 */}
+            {agent.conversationId && (
+                <p className="ai-hint ai-conversation">
+                    助手记得这次对话。
+                    <button type="button" onClick={handleNewConversation}>
+                        开始新对话
+                    </button>
+                </p>
+            )}
+
             {ai.error && <p style={{ color: "red" }}>出错了：{ai.error}</p>}
             {agent.error && <p style={{ color: "red" }}>出错了：{agent.error}</p>}
             {aiConfirmError && (
@@ -259,6 +303,7 @@ function App() {
             {/* 助手做完之后显示它说了什么、做了什么、还想做什么 */}
             <AgentPanel
                 result={agent.result}
+                continued={agent.continued}
                 onConfirmDelete={handleAgentConfirmDelete}
                 onDismiss={agent.dismissProposal}
             />

@@ -204,6 +204,30 @@ h2 {
     line-height: 1.5;
 }
 
+/* 对话状态那一条：带一个"开始新对话"的小按钮。
+   ⚠️ 按钮做成"文字链接"的样子，因为它是个次要动作 ——
+      和"添加""交给助手"那种主按钮长得一样，用户就会以为它也是在做正事。 */
+.ai-conversation {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ai-conversation button {
+    padding: 2px 8px;
+    font-size: 12px;
+    background: none;
+    border: 1px solid #cbd5e1;
+    color: #475569;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.ai-conversation button:hover {
+    background: #f1f5f9;
+}
+
 .agent-panel {
     margin-top: 16px;
     padding: 16px;
