@@ -17,6 +17,13 @@ tests/_tmp*/
 .coverage
 htmlcov/
 
+# 评估集的产物（evals/run.py）
+#   _tmp/     —— agent 用例的临时库，每次跑都重建
+#   results/  —— 每次跑出来的 jsonl。平时不提交（跑一次就多一堆）；
+#                想把某一次的"基线"留档时，单独 `git add -f evals/results/<那个文件>`。
+evals/_tmp/
+evals/results/
+
 # 数据库文件（含本地数据）
 *.db
 *.sqlite3
